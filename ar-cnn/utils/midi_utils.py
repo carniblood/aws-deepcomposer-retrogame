@@ -23,8 +23,7 @@ import pypianoroll
 from pypianoroll import Multitrack
 from texttable import Texttable
 
-
-def process_midi(midi_file, beat_resolution):
+def process_midi(midi_file, beat_resolution, program=0):
     '''Takes path to an input midi file and parses it to pianoroll
     :param input_midi: Path to midi file
     :param beat_resolution
@@ -33,39 +32,78 @@ def process_midi(midi_file, beat_resolution):
     multi_track = pypianoroll.Multitrack(beat_resolution=beat_resolution)
     try:
         multi_track.parse_midi(midi_file,
+                               skip_empty_tracks=False,
+                               #collect_onsets_only=True,
                                algorithm='custom',
                                first_beat_time=0)
     except:
         print("midi file: {} is invalid. Ignoring during preprocessing".format(
             midi_file))
         pass
+        
     # Convert the PianoRoll to binary ignoring the values of velocities
+    
     multi_track.binarize()
-    track_indices = list(np.arange(len(
-        multi_track.tracks)))  # Merge multiple tracks into a single track
+    track_indices = [] 		# to merge all the voices
+    track_indices_drum = [] # to merge drums
+    for index,track in enumerate(multi_track.tracks):
+        if track.is_drum:
+            track_indices_drum.append(index)
+        else:
+            track_indices.append(index)
+           
+    if len(track_indices) == 0:
+        print("midi file: {} is empty. Ignoring during preprocessing".format(midi_file))
+        pass
+          
+    if len(track_indices_drum) == 0:
+        print("midi file: {} has no drum. Ignoring during preprocessing".format(midi_file))
+        pass
+        
     multi_track.merge_tracks(track_indices=track_indices,
                              mode='any',
-                             remove_merged=True)
+                             program=program,
+                             remove_merged=False)
+         
     pianoroll = multi_track.tracks[0].pianoroll
-    return pianoroll
+    drums = np.zeros((pianoroll.shape[0], 128), bool)
+                       
+    if len(track_indices_drum) > 0:
+        multi_track.merge_tracks(track_indices=track_indices_drum,
+                                 mode='any',
+                                 is_drum=True,
+                                 remove_merged=False)
+        drums = multi_track.tracks[1].pianoroll         
+    
+    return pianoroll,drums
 
 
-def process_pianoroll(pianoroll, time_steps_shifted_per_sample,
-                      timesteps_per_nbars):
+def process_pianoroll(pianoroll, drums,
+                      total_time_steps_shifted_per_sample,
+                      total_timesteps_per_nbars):
     '''Takes path to an input midi file and parses it to pianoroll
     :param pianoroll: pianoroll obtained after parsing midi file
     :param time_steps_shifted_per_sample: number of bars to be shifted in timesteps
     param timesteps_per_nbars: total number of timesteps to be included in processed pianoroll
     :return: parsed painoroll sections
     '''
+    
+    time_steps_shifted_per_sample = total_time_steps_shifted_per_sample // 2
+    timesteps_per_nbars = total_timesteps_per_nbars // 2
+    
     pianoroll_sections = []
     truncated_pianoroll_length = pianoroll.shape[0] - (pianoroll.shape[0] %
                                                        timesteps_per_nbars)
     for i in range(0, truncated_pianoroll_length - timesteps_per_nbars + 1,
                    time_steps_shifted_per_sample):
-        pianoroll_sections.append(pianoroll[i:i + timesteps_per_nbars, :])
+					   
+        pianoroll_section = pianoroll[i:i + timesteps_per_nbars, :]
+        drum_section = drums[i:i + timesteps_per_nbars, :]
+					   
+        section = np.concatenate((pianoroll_section, drum_section))		
+        pianoroll_sections.append(section)
+        
     return pianoroll_sections
-
 
 def play_midi(input_midi):
     '''Takes path to an input and plays the midi file in the notebook cell
