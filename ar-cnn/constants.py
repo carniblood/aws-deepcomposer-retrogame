@@ -36,3 +36,4 @@ class Constants():
     number_of_channels = 1
     output_file_path = "outputs/output_{}.mid"
     tempo = 100  # 100 bpm
+    program = 80

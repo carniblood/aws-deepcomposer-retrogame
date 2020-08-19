@@ -56,7 +56,7 @@ class Inference:
                                              compile=False)
 
     @staticmethod
-    def convert_tensor_to_midi(tensor, tempo, output_file_path):
+    def convert_tensors_to_midi(tensors, tempo, program, output_file_path):
         """
         Writes a pianoroll tensor to a midi file
 
@@ -73,12 +73,28 @@ class Inference:
         -------
         None
         """
-
-        single_track = pypianoroll.Track(pianoroll=tensor)
+        
+        tensor_size = tensors[0].shape[1]
+        real_size = tensor_size // 2
+        
+        pianoroll = np.zeros((0, 128), bool)
+        drums = np.zeros((0, 128), bool)
+        
+        for tensor in tensors:			
+            pianoroll_tensor = tensor[0:real_size,:]
+            drums_tensor = tensor[real_size:tensor_size,:]
+            
+            pianoroll = np.concatenate((pianoroll, pianoroll_tensor))
+            drums = np.concatenate((drums, drums_tensor))
+            
+        pianoroll_track = pypianoroll.Track(pianoroll=pianoroll, program=program)
+        drums_track = pypianoroll.Track(pianoroll=drums, is_drum=True)
+        
         multi_track = pypianoroll.Multitrack(
-            tracks=[single_track],
+            tracks=[pianoroll_track, drums_track],
             tempo=tempo,
             beat_resolution=Constants.beat_resolution)
+            
         output_file_index = 0
         while os.path.isfile(output_file_path.format(output_file_index)):
             output_file_index += 1
@@ -158,19 +174,24 @@ class Inference:
         None
         """
         try:
-            input_tensor = self.convert_midi_to_tensor(input_midi_path)
-            output_tensor = self.sample_multiple(
-                input_tensor, inference_params['temperature'],
-                inference_params['maxPercentageOfInitialNotesRemoved'],
-                inference_params['maxNotesAdded'],
-                inference_params['samplingIterations'])
-            self.convert_tensor_to_midi(output_tensor, Constants.tempo,
-                                        Constants.output_file_path)
+            input_tensors = self.convert_midi_to_tensors(input_midi_path)
+            output_tensors = []
+            
+            for input_tensor in input_tensors:
+                output_tensor = self.sample_multiple(
+                    input_tensor, inference_params['temperature'],
+                    inference_params['maxPercentageOfInitialNotesRemoved'],
+                    inference_params['maxNotesAdded'],
+                    inference_params['samplingIterations'])
+                output_tensors.append(output_tensor)
+                    
+            self.convert_tensors_to_midi(output_tensors, Constants.tempo,
+                                        Constants.program, Constants.output_file_path)
         except Exception:
             logger.error("Unable to generate composition.")
             raise
 
-    def convert_midi_to_tensor(self, input_midi_path):
+    def convert_midi_to_tensors(self, input_midi_path):
         """
         Converts a midi to pianoroll tensor
 
@@ -197,19 +218,26 @@ class Inference:
         if len(multi_track.tracks) > 1:
             logger.error("Input MIDI file has more than 1 track.")
 
-        multi_track.pad_to_multiple(self.number_of_timesteps)
+        real_number_of_timesteps = self.number_of_timesteps // 2
+
+        multi_track.pad_to_multiple(real_number_of_timesteps)
         multi_track.binarize()
         pianoroll = multi_track.tracks[0].pianoroll
+            
+        tensors = []
+        
+        dummy_drums = np.zeros((64, 128), bool)
+                                 
+        for i in range(0, pianoroll.shape[0] - real_number_of_timesteps + 1,
+                        real_number_of_timesteps):
+										   
+            tensor = pianoroll[i:i+real_number_of_timesteps, ]
+            tensor = np.concatenate((tensor, dummy_drums))
+            tensor = np.expand_dims(tensor, axis=0)
+            tensor = np.expand_dims(tensor, axis=3)
+            tensors.append(tensor)
 
-        if pianoroll.shape[0] > self.number_of_timesteps:
-            logger.error("Input MIDI file is longer than 8 bars.")
-
-        # truncate
-        tensor = pianoroll[0:self.number_of_timesteps, ]
-        tensor = np.expand_dims(tensor, axis=0)
-        tensor = np.expand_dims(tensor, axis=3)
-
-        return tensor
+        return tensors
 
     def mask_not_allowed_notes(self, current_input_indices, output_tensor):
         """
