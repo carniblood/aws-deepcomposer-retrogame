@@ -75,18 +75,31 @@ class Inference:
         """
         
         tensor_size = tensors[0].shape[1]
-        real_size = tensor_size // 2
         
+        if Constants.split_into_two_voices:
+            real_size = tensor_size // 2
+        else:
+            real_size = tensor_size
+
         pianoroll = np.zeros((0, 128), bool)
         drums = np.zeros((0, 128), bool)
-        
+            
         for tensor in tensors:			
-            pianoroll_tensor = tensor[0:real_size,:]
-            drums_tensor = tensor[real_size:tensor_size,:]
+            pianoroll_tensor = tensor[0:real_size,0:Constants.voices_maximum]
+            drums_tensor = tensor[tensor_size-real_size:tensor_size,Constants.voices_maximum + 1:]
+            
+            if not Constants.split_into_two_voices:
+                # resize pianoroll tensor
+                pianoroll_tensor = np.pad(pianoroll_tensor, ((0,0),(0,128-Constants.voices_maximum)))
+                # extract specific notes from drum tensor
+                new_drums = np.zeros((tensor_size, 128), bool)
+                for index,position in enumerate(Constants.drums):
+                    new_drums[:,position] = drums_tensor[:,index]
+                drums_tensor = new_drums
             
             pianoroll = np.concatenate((pianoroll, pianoroll_tensor))
             drums = np.concatenate((drums, drums_tensor))
-            
+                
         pianoroll_track = pypianoroll.Track(pianoroll=pianoroll, program=program)
         drums_track = pypianoroll.Track(pianoroll=drums, is_drum=True)
         
@@ -219,21 +232,29 @@ class Inference:
         if len(multi_track.tracks) > 1:
             logger.error("Input MIDI file has more than 1 track.")
 
-        real_number_of_timesteps = self.number_of_timesteps // 2
+        if Constants.split_into_two_voices:
+            real_number_of_timesteps = self.number_of_timesteps // 2
+        else:
+            real_number_of_timesteps = self.number_of_timesteps
 
         multi_track.pad_to_multiple(real_number_of_timesteps)
         multi_track.binarize()
         pianoroll = multi_track.tracks[0].pianoroll
             
         tensors = []
-        
-        dummy_drums = np.zeros((64, 128), bool)
-                                 
+                                         
         for i in range(0, pianoroll.shape[0] - real_number_of_timesteps + 1,
                         real_number_of_timesteps):
-										   
-            tensor = pianoroll[i:i+real_number_of_timesteps, ]
-            tensor = np.concatenate((tensor, dummy_drums))
+
+            tensor = pianoroll[i:i+real_number_of_timesteps, :Constants.voices_maximum]
+            
+            if Constants.split_into_two_voices:
+                dummy_drums = np.zeros((real_number_of_timesteps, 128), bool)
+                tensor = np.concatenate((tensor, dummy_drums))
+            else:
+                # instead squeeze the empty drums at the end of the pianoroll
+                tensor = np.pad(tensor, ((0,0),(0,128-Constants.voices_maximum)))
+                
             tensor = np.expand_dims(tensor, axis=0)
             tensor = np.expand_dims(tensor, axis=3)
             tensors.append(tensor)
