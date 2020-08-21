@@ -34,14 +34,15 @@ class AddAndRemoveAPercentageOfNotes():
         self.sampling_lower_bound_add = sampling_lower_bound_add
         self.sampling_upper_bound_add = sampling_upper_bound_add
 
-    def apply_augmentation_to_sample(self, piano_roll):
+    def apply_augmentation_to_sample(self, piano_roll, multiplier):
         '''
         Randomly adds and removes percentages of notes.
         '''
-        sampling_percentage_remove = np.random.random_integers(
+        sampling_percentage_remove = multiplier * np.random.random_integers(
             self.sampling_lower_bound_remove, self.sampling_upper_bound_remove)
-        sampling_percentage_add = np.random.uniform(
+        sampling_percentage_add = multiplier * np.random.uniform(
             self.sampling_lower_bound_add, self.sampling_upper_bound_add)
+            
         # Removing certain values of nonzero indices
         # based on the presence and absence of number of notes
         rows_remove_notes, columns_remove_notes = self.create_notes_mask(
@@ -81,13 +82,22 @@ class AddAndRemoveAPercentageOfNotes():
         return rows_modified_notes, columns_modified_notes
 
     def sample(self, piano_roll, number_of_samples, piano_roll_split_index):
+
+        first_part = piano_roll[:,0:piano_roll_split_index]
+        second_part = piano_roll[:,piano_roll_split_index:]
+
+        ratio_first_part = first_part.size / piano_roll.size;
+        ratio_second_part = 1.0 - ratio_first_part
+        
+        # Adjust percentage based on the size ratio for each piano_roll
+        first_part_multiplier = 0.5 / ratio_first_part
+        second_part_multiplier = 0.5 / ratio_second_part
+        
         results = []
         for _ in range(number_of_samples):
-            first_part = piano_roll[:,0:piano_roll_split_index]
-            second_part = piano_roll[:,piano_roll_split_index:]
             
-            result = self.apply_augmentation_to_sample(first_part)            
-            result = np.concatenate((result, self.apply_augmentation_to_sample(second_part)), axis=1)
+            result = self.apply_augmentation_to_sample(first_part, first_part_multiplier)            
+            result = np.concatenate((result, self.apply_augmentation_to_sample(second_part, second_part_multiplier)), axis=1)
             
             results.append(result)
         return results
