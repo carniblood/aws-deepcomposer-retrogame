@@ -23,6 +23,8 @@ import pypianoroll
 from pypianoroll import Multitrack
 from texttable import Texttable
 
+from constants import Constants
+
 def process_midi(midi_file, beat_resolution, program=0):
     '''Takes path to an input midi file and parses it to pianoroll
     :param input_midi: Path to midi file
@@ -87,20 +89,34 @@ def process_pianoroll(pianoroll, drums,
     param timesteps_per_nbars: total number of timesteps to be included in processed pianoroll
     :return: parsed painoroll sections
     '''
-    
-    time_steps_shifted_per_sample = total_time_steps_shifted_per_sample // 2
-    timesteps_per_nbars = total_timesteps_per_nbars // 2
-    
+
+    if Constants.split_into_two_voices:
+        time_steps_shifted_per_sample = total_time_steps_shifted_per_sample // 2
+        timesteps_per_nbars = total_timesteps_per_nbars // 2
+    else:
+        time_steps_shifted_per_sample = total_time_steps_shifted_per_sample
+        timesteps_per_nbars = total_timesteps_per_nbars
+        # instead squeeze drums at the end of the pianoroll
+        drum_subset = np.take(drums, axis=1, indices=Constants.drums)
+        drum_end_fill = np.zeros((pianoroll.shape[0], 128 - Constants.voices_maximum - drum_subset.shape[1]), bool)
+        np.resize(pianoroll, [pianoroll.shape[0],Constants.voices_maximum])
+        np.concatenate((pianoroll, drum_subset), axis=1)
+        np.concatenate((pianoroll, drum_end_fill), axis=1)
+
     pianoroll_sections = []
     truncated_pianoroll_length = pianoroll.shape[0] - (pianoroll.shape[0] %
                                                        timesteps_per_nbars)
+                                                       
     for i in range(0, truncated_pianoroll_length - timesteps_per_nbars + 1,
                    time_steps_shifted_per_sample):
-					   
-        pianoroll_section = pianoroll[i:i + timesteps_per_nbars, :]
-        drum_section = drums[i:i + timesteps_per_nbars, :]
-					   
-        section = np.concatenate((pianoroll_section, drum_section))		
+					
+        if Constants.split_into_two_voices:
+            pianoroll_section = pianoroll[i:i + timesteps_per_nbars, :]
+            drum_section = drums[i:i + timesteps_per_nbars, :]					   
+            section = np.concatenate((pianoroll_section, drum_section))	
+        else:	
+            section = pianoroll[i:i + timesteps_per_nbars, :]
+        
         pianoroll_sections.append(section)
         
     return pianoroll_sections

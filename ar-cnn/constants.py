@@ -36,4 +36,7 @@ class Constants():
     number_of_channels = 1
     output_file_path = "outputs/output_{}.mid"
     tempo = 100  # 100 bpm
+    split_into_two_voices=False
     program = 80
+    voices_maximum = 110 # it leaves up to 18 instruments for the drums
+    drums=[35, 36, 38, 42, 44, 46]
