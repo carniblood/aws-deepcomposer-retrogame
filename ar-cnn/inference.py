@@ -95,10 +95,11 @@ class Inference:
             tempo=tempo,
             beat_resolution=Constants.beat_resolution)
             
-        output_file_index = 0
-        while os.path.isfile(output_file_path.format(output_file_index)):
-            output_file_index += 1
-        multi_track.write(output_file_path.format(output_file_index))
+        #output_file_index = 0
+        #while os.path.isfile(output_file_path.format(output_file_index)):
+        #    output_file_index += 1
+        #multi_track.write(output_file_path.format(output_file_index))
+        multi_track.write(output_file_path)
 
     @staticmethod
     def get_indices(input_tensor, value):
@@ -158,7 +159,7 @@ class Inference:
         sampled_index = np.unravel_index(sampled_index, input_tensor.shape)
         return sampled_index
 
-    def generate_composition(self, input_midi_path, inference_params):
+    def generate_composition(self, input_midi_path, output_midi_path, inference_params):
         """
         Generates a new composition based on an old midi
 
@@ -186,7 +187,7 @@ class Inference:
                 output_tensors.append(output_tensor)
                     
             self.convert_tensors_to_midi(output_tensors, Constants.tempo,
-                                        Constants.program, Constants.output_file_path)
+                                        Constants.program, output_midi_path)
         except Exception:
             logger.error("Unable to generate composition.")
             raise
