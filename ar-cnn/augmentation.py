@@ -80,8 +80,14 @@ class AddAndRemoveAPercentageOfNotes():
             indices[1], num_notes))
         return rows_modified_notes, columns_modified_notes
 
-    def sample(self, piano_roll, number_of_samples):
-        result = []
+    def sample(self, piano_roll, number_of_samples, piano_roll_split_index):
+        results = []
         for _ in range(number_of_samples):
-            result.append(self.apply_augmentation_to_sample(piano_roll))
-        return result
+            first_part = piano_roll[:,0:piano_roll_split_index]
+            second_part = piano_roll[:,piano_roll_split_index:]
+            
+            result = self.apply_augmentation_to_sample(first_part)            
+            result = np.concatenate((result, self.apply_augmentation_to_sample(second_part)), axis=1)
+            
+            results.append(result)
+        return results

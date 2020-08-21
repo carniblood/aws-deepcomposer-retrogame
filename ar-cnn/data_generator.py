@@ -22,6 +22,7 @@ import numpy as np
 import keras
 from augmentation import AddAndRemoveAPercentageOfNotes
 
+from constants import Constants
 
 class PianoRollGenerator(keras.utils.Sequence):
     def __init__(self, sample_list, batch_size, bars, samples_per_data_item,
@@ -71,7 +72,7 @@ class PianoRollGenerator(keras.utils.Sequence):
                     sampling_upper_bound_add=self.sampling_upper_bound_add)
 
                 input_pianorolls = add_remove_notes.sample(
-                    target_pianoroll, self.samples_per_data_item)
+                    target_pianoroll, self.samples_per_data_item, Constants.voices_maximum)
 
                 for input_pianoroll in input_pianorolls:
                     training_input.append(
