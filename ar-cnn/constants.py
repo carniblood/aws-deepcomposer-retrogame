@@ -30,6 +30,8 @@ class Constants():
     beat_resolution = 4
     # number of bars to be shifted
     bars_shifted_per_sample = 4
+    # cache the timestep calculation
+    number_of_timesteps = (beat_resolution * beats_per_bar * bars)
     # Total number of pitches in a Pianoroll
     number_of_pitches = 128
     # Total number of Tracks
@@ -38,5 +40,5 @@ class Constants():
     tempo = 100  # 100 bpm
     split_into_two_voices=False
     program = 80
-    voices_maximum = 110 # it leaves up to 18 instruments for the drums
+    voices_maximum = 116 # it leaves up to 12 instruments for the drums
     drums=[35, 36, 38, 42, 44, 46]

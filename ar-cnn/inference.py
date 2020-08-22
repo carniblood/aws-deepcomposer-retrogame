@@ -26,14 +26,14 @@ from losses import Loss
 from constants import Constants
 import copy
 
+from utils.midi_utils import print_midi_info, process_pianoroll, process_midi, plot_pianoroll
+
 logger = logging.getLogger(__name__)
 
 
 class Inference:
     def __init__(self, model=None):
         self.model = model
-        self.number_of_timesteps = (Constants.beat_resolution *
-                                    Constants.beats_per_bar * Constants.bars)
 
     def load_model(self, model_path):
         """
@@ -73,7 +73,7 @@ class Inference:
         -------
         None
         """
-        
+
         tensor_size = tensors[0].shape[1]
         
         if Constants.split_into_two_voices:
@@ -86,11 +86,11 @@ class Inference:
             
         for tensor in tensors:			
             pianoroll_tensor = tensor[0:real_size,0:Constants.voices_maximum]
-            drums_tensor = tensor[tensor_size-real_size:tensor_size,Constants.voices_maximum + 1:]
+            drums_tensor = tensor[tensor_size-real_size:tensor_size,Constants.voices_maximum:]
             
             if not Constants.split_into_two_voices:
                 # resize pianoroll tensor
-                pianoroll_tensor = np.pad(pianoroll_tensor, ((0,0),(0,128-Constants.voices_maximum)))
+                pianoroll_tensor = np.concatenate((pianoroll_tensor, np.zeros((real_size,128-Constants.voices_maximum), bool)), axis=1)
                 # extract specific notes from drum tensor
                 new_drums = np.zeros((tensor_size, 128), bool)
                 for index,position in enumerate(Constants.drums):
@@ -100,6 +100,13 @@ class Inference:
             pianoroll = np.concatenate((pianoroll, pianoroll_tensor))
             drums = np.concatenate((drums, drums_tensor))
                 
+        #plot_pianoroll(pianoroll,
+        #    beat_resolution=Constants.beat_resolution,
+        #    fig_name="output_pianoroll")
+        #plot_pianoroll(drums,
+        #    beat_resolution=Constants.beat_resolution,
+        #    fig_name="output_drums")
+            
         pianoroll_track = pypianoroll.Track(pianoroll=pianoroll, program=program)
         drums_track = pypianoroll.Track(pianoroll=drums, is_drum=True)
         
@@ -220,44 +227,35 @@ class Inference:
             2d tensor that is a pianoroll
         """
 
-        multi_track = pypianoroll.Multitrack(
-            beat_resolution=Constants.beat_resolution)
-        try:
-            multi_track.parse_midi(input_midi_path,
-                                   algorithm='custom',
-                                   first_beat_time=0)
-        except Exception as e:
-            logger.error("Failed to parse the MIDI file.")
+        print('process ' + input_midi_path + '...')
+        print_midi_info(input_midi_path)
+        
+        pianoroll, drums = process_midi(input_midi_path,
+			beat_resolution=Constants.beat_resolution,
+			program=Constants.program,
+            ignore_warnings=True)
 
-        if len(multi_track.tracks) > 1:
-            logger.error("Input MIDI file has more than 1 track.")
-
-        if Constants.split_into_two_voices:
-            real_number_of_timesteps = self.number_of_timesteps // 2
-        else:
-            real_number_of_timesteps = self.number_of_timesteps
-
-        multi_track.pad_to_multiple(real_number_of_timesteps)
-        multi_track.binarize()
-        pianoroll = multi_track.tracks[0].pianoroll
+        #plot_pianoroll(pianoroll,
+        #    beat_resolution=Constants.beat_resolution,
+        #    fig_name="original_pianoroll")
+        #plot_pianoroll(drums,
+        #    beat_resolution=Constants.beat_resolution,
+        #    fig_name="original_drums")
+			
+        tensors = process_pianoroll(pianoroll, drums,
+			Constants.number_of_timesteps, Constants.number_of_timesteps)
             
-        tensors = []
-                                         
-        for i in range(0, pianoroll.shape[0] - real_number_of_timesteps + 1,
-                        real_number_of_timesteps):
-
-            tensor = pianoroll[i:i+real_number_of_timesteps, :Constants.voices_maximum]
+        #combined_pianoroll = np.zeros((0, 128), bool)
+        #for tensor in tensors:
+        #    combined_pianoroll = np.concatenate((combined_pianoroll, tensor))        
+        #plot_pianoroll(combined_pianoroll,
+        #    beat_resolution=Constants.beat_resolution,
+        #    fig_name="processed_pianoroll")
             
-            if Constants.split_into_two_voices:
-                dummy_drums = np.zeros((real_number_of_timesteps, 128), bool)
-                tensor = np.concatenate((tensor, dummy_drums))
-            else:
-                # instead squeeze the empty drums at the end of the pianoroll
-                tensor = np.pad(tensor, ((0,0),(0,128-Constants.voices_maximum)))
-                
+        for index, tensor in enumerate(tensors):
             tensor = np.expand_dims(tensor, axis=0)
             tensor = np.expand_dims(tensor, axis=3)
-            tensors.append(tensor)
+            tensors[index] = tensor
 
         return tensors
 
@@ -327,7 +325,7 @@ class Inference:
                 original_input_one_indices, original_input_zero_indices,
                 current_input_zero_indices, current_input_one_indices)
 
-        return input_tensor.reshape(self.number_of_timesteps,
+        return input_tensor.reshape(Constants.number_of_timesteps,
                                     Constants.number_of_pitches)
 
     def sample_notes_from_model(self,
@@ -380,6 +378,10 @@ class Inference:
         """
 
         output_tensor = self.model.predict([input_tensor])
+
+        # TEST: drums only
+        output_tensor[:,:Constants.voices_maximum,:,:].fill(0)
+        output_tensor /= output_tensor.sum()
 
         # Apply temperature and softmax
         output_tensor = self.get_softmax(output_tensor, temperature)
