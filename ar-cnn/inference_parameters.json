@@ -2,5 +2,7 @@
   "temperature": 1,
   "maxNotesAdded": 500,
   "maxPercentageOfInitialNotesRemoved": 100,
-  "samplingIterations": 100
+  "samplingIterations": 100,
+  "generateVoice": 1,
+  "generateDrums": 1
 }

@@ -74,6 +74,9 @@ class Inference:
         None
         """
 
+        if len(tensors) == 0:
+            return;
+
         tensor_size = tensors[0].shape[1]
         
         if Constants.split_into_two_voices:
@@ -203,7 +206,9 @@ class Inference:
                     input_tensor, inference_params['temperature'],
                     inference_params['maxPercentageOfInitialNotesRemoved'],
                     inference_params['maxNotesAdded'],
-                    inference_params['samplingIterations'])
+                    inference_params['samplingIterations'],    
+                    inference_params['generateVoice'],                 
+                    inference_params['generateDrums'])
                 output_tensors.append(output_tensor)
                     
             self.convert_tensors_to_midi(output_tensors, Constants.tempo,
@@ -228,7 +233,7 @@ class Inference:
         """
 
         print('process ' + input_midi_path + '...')
-        print_midi_info(input_midi_path)
+        #print_midi_info(input_midi_path)
         
         pianoroll, drums = process_midi(input_midi_path,
 			beat_resolution=Constants.beat_resolution,
@@ -283,7 +288,7 @@ class Inference:
 
     def sample_multiple(self, input_tensor, temperature,
                         max_removal_percentage, max_notes_to_add,
-                        number_of_iterations):
+                        number_of_iterations, generate_voice, generate_drums):
         """
         Samples multiple times from an tensor.
         Returns the final output tensor after X number of iterations.
@@ -300,6 +305,10 @@ class Inference:
             maximum number of notes that can be added to the original input
         number_of_iterations : int
             number of iterations to sample from the model predictions
+        generate_voice : bool
+            if True, generate samples for the main voice
+        generate_drums : bool
+            if True, generate samples for the drum beats
 
         Returns
         -------
@@ -318,12 +327,23 @@ class Inference:
         current_input_one_indices = copy.deepcopy(original_input_one_indices)
         current_input_zero_indices = copy.deepcopy(original_input_zero_indices)
 
-        for _ in range(number_of_iterations):
-            input_tensor, notes_removed_count, notes_added_count = self.sample_notes_from_model(
-                input_tensor, max_original_notes_to_remove, max_notes_to_add,
-                temperature, notes_removed_count, notes_added_count,
-                original_input_one_indices, original_input_zero_indices,
-                current_input_zero_indices, current_input_one_indices)
+        if not generate_drums and not generate_voice:
+            print("nothing to generate...")
+        else:
+
+            if not generate_drums:
+                print("generate voice only...")
+
+            if not generate_voice:            
+                print("generate drums only...")
+
+            for _ in range(number_of_iterations):
+                    input_tensor, notes_removed_count, notes_added_count = self.sample_notes_from_model(
+                        input_tensor, max_original_notes_to_remove, max_notes_to_add,
+                        temperature, generate_voice, generate_drums,
+                        notes_removed_count, notes_added_count,
+                        original_input_one_indices, original_input_zero_indices,
+                        current_input_zero_indices, current_input_one_indices)
 
         return input_tensor.reshape(Constants.number_of_timesteps,
                                     Constants.number_of_pitches)
@@ -333,6 +353,8 @@ class Inference:
                                 max_original_notes_to_remove,
                                 max_notes_to_add,
                                 temperature,
+                                generate_voice,
+                                generate_drums,
                                 notes_removed_count,
                                 notes_added_count,
                                 original_input_one_indices,
@@ -354,6 +376,10 @@ class Inference:
             maximum number of notes that can be added to the original input
         temperature : float
             temperature to apply before softmax during inference
+        generate_voice : bool
+            if True, generate samples for the main voice
+        generate_drums : bool
+            if True, generate samples for the drum beats
         notes_removed_count : int
             number of original notes that have been removed from input
         notes_added_count : int
@@ -377,11 +403,11 @@ class Inference:
             updated number of new notes added
         """
 
-        output_tensor = self.model.predict([input_tensor])
+        if not generate_voice and not generate_drums:
+            # nothing to generate, just return the input directly           
+            return input_tensor, notes_removed_count, notes_added_count
 
-        # TEST: drums only
-        output_tensor[:,:Constants.voices_maximum,:,:].fill(0)
-        output_tensor /= output_tensor.sum()
+        output_tensor = self.model.predict([input_tensor])
 
         # Apply temperature and softmax
         output_tensor = self.get_softmax(output_tensor, temperature)
@@ -394,8 +420,56 @@ class Inference:
             # Mask all pixels that both do not have a note and were not once part of the original input
             output_tensor = self.mask_not_allowed_notes(current_input_zero_indices, output_tensor)
 
+        output_tensor_voice = output_tensor.copy()
+        output_tensor_drums = output_tensor.copy()
+
+        output_tensor_voice[:,:,Constants.voices_maximum:,:].fill(0)
+        output_tensor_drums[:,:,:Constants.voices_maximum,:].fill(0)
+        
+        if generate_voice:
+            input_tensor, notes_removed_count, notes_added_count = self.sample_notes_from_model_tensor_output(
+                input_tensor,
+                output_tensor_voice,
+                max_original_notes_to_remove,
+                max_notes_to_add,
+                notes_removed_count,
+                notes_added_count,
+                original_input_one_indices,
+                original_input_zero_indices,
+                current_input_zero_indices,
+                current_input_one_indices)
+
+        if generate_drums:            
+            input_tensor, notes_removed_count, notes_added_count = self.sample_notes_from_model_tensor_output(
+                input_tensor,
+                output_tensor_drums,
+                max_original_notes_to_remove,
+                max_notes_to_add,
+                notes_removed_count,
+                notes_added_count,
+                original_input_one_indices,
+                original_input_zero_indices,
+                current_input_zero_indices,
+                current_input_one_indices)
+
+        return input_tensor, notes_removed_count, notes_added_count
+            
+    def sample_notes_from_model_tensor_output(self,
+                                              input_tensor,
+                                              output_tensor,
+                                              max_original_notes_to_remove,
+                                              max_notes_to_add,
+                                              notes_removed_count,
+                                              notes_added_count,
+                                              original_input_one_indices,
+                                              original_input_zero_indices,
+                                              current_input_zero_indices,
+                                              current_input_one_indices):
+        
         if np.count_nonzero(output_tensor) == 0:
             return input_tensor, notes_removed_count, notes_added_count
+
+        output_tensor /= output_tensor.sum()
 
         sampled_index = self.get_sampled_index(output_tensor)
         sampled_index_transpose = tuple(np.array(sampled_index).T[0])
